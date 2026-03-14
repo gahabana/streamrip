@@ -12,6 +12,7 @@ import tempfile
 import time
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
+from tempfile import gettempdir
 from typing import Any, Callable, Optional
 
 import aiofiles
@@ -304,6 +305,95 @@ class TidalDownloadable(Downloadable):
         async with aiofiles.open(in_path, "rb") as enc_file:
             dec_bytes = decryptor.decrypt(await enc_file.read())
             return dec_bytes
+
+
+class TidalDashDownloadable(Downloadable):
+    """Downloads a Tidal Hi-Res track delivered as MPEG-DASH segments.
+
+    Tidal returns Hi-Res Lossless (24-bit FLAC) as a DASH manifest with
+    one initialization segment followed by N media segments. All segments
+    must be downloaded and concatenated in order to produce a valid FLAC file.
+    """
+
+    def __init__(
+        self,
+        session: aiohttp.ClientSession,
+        urls: list[str],
+        codec: str,
+    ):
+        self.session = session
+        self.source = "tidal"
+        self.urls = urls  # [init_url, seg_1, seg_2, ...]
+        codec = codec.lower()
+        self.extension = "flac" if codec in ("flac", "mqa") else "m4a"
+        self._size = len(urls)
+
+    async def _download(self, path: str, callback):
+        """Download all segments concurrently, concatenate, then remux to FLAC."""
+        # Use a semaphore to avoid hammering Tidal with too many simultaneous requests
+        sem = asyncio.Semaphore(8)
+        segment_count = len(self.urls)
+        segment_paths: dict[int, str] = {}
+
+        tasks = [
+            asyncio.create_task(self._download_segment(i, url, sem))
+            for i, url in enumerate(self.urls)
+        ]
+
+        for coro in asyncio.as_completed(tasks):
+            index, seg_path = await coro
+            segment_paths[index] = seg_path
+            callback(1)
+
+        # Concatenate segments in order into a temporary fMP4 file
+        ordered_paths = [segment_paths[i] for i in range(segment_count)]
+        concat_tmp = os.path.join(gettempdir(), f"__streamrip_dash_{time.time()}.mp4")
+        async with aiofiles.open(concat_tmp, "wb") as outfile:
+            for seg_path in ordered_paths:
+                async with aiofiles.open(seg_path, "rb") as seg_file:
+                    await outfile.write(await seg_file.read())
+
+        # Clean up temp segment files
+        for seg_path in ordered_paths:
+            try:
+                os.remove(seg_path)
+            except OSError:
+                pass
+
+        # Remux fMP4 (DASH container) to raw FLAC using ffmpeg.
+        # The audio codec is already FLAC — this just strips the MP4 container.
+        if self.extension == "flac":
+            command = [
+                "ffmpeg", "-y",
+                "-i", concat_tmp,
+                "-c:a", "copy",
+                "-loglevel", "warning",
+                path,
+            ]
+            process = await asyncio.create_subprocess_exec(
+                *command, stderr=asyncio.subprocess.PIPE,
+            )
+            _, stderr = await process.communicate()
+            os.remove(concat_tmp)
+            if process.returncode != 0:
+                raise Exception(
+                    f"FFmpeg remux failed (rc={process.returncode}): {stderr.decode()}"
+                )
+        else:
+            # Non-FLAC codec (e.g. AAC in m4a) — fMP4 is already valid
+            shutil.move(concat_tmp, path)
+
+    async def _download_segment(
+        self, index: int, url: str, sem: asyncio.Semaphore
+    ) -> tuple[int, str]:
+        tmp = generate_temp_path(url)
+        async with sem:
+            async with self.session.get(url) as resp:
+                resp.raise_for_status()
+                async with aiofiles.open(tmp, "wb") as f:
+                    async for chunk in resp.content.iter_chunked(1024 * 64):
+                        await f.write(chunk)
+        return index, tmp
 
 
 class SoundcloudDownloadable(Downloadable):

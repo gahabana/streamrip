@@ -322,24 +322,36 @@ class AlbumMetadata:
             "HIGH": 1,
             "LOSSLESS": 2,
             "HI_RES": 3,
+            "HI_RES_LOSSLESS": 3,
         }
 
         tidal_quality = resp.get("audioQuality", "LOW")
-        quality = quality_map[tidal_quality]
+        quality = quality_map.get(tidal_quality, 0)
+
+        # The Tidal metadata API reports audioQuality as "LOSSLESS" even for
+        # Hi-Res tracks. The true capability is in mediaMetadata.tags.
+        # Check the album response first, then fall back to the first track.
+        media_tags = safe_get(resp, "mediaMetadata", "tags", default=[])
+        if not media_tags:
+            tracks = resp.get("tracks", [])
+            if tracks:
+                media_tags = safe_get(tracks[0], "mediaMetadata", "tags", default=[])
+
+        if "HIRES_LOSSLESS" in media_tags and quality < 3:
+            quality = 3
+
         if quality >= 2:
-            sampling_rate = 44100
-            if quality == 3:
-                bit_depth = 24
-            else:
-                bit_depth = 16
+            sampling_rate = resp.get("sampleRate", 44100)
+            bit_depth = resp.get("bitDepth", 24 if quality == 3 else 16)
         else:
             sampling_rate = None
             bit_depth = None
 
+        container = "FLAC" if quality == 3 else "MP4"
         info = AlbumInfo(
             id=item_id,
             quality=quality,
-            container="MP4",
+            container=container,
             label=None,
             explicit=explicit,
             sampling_rate=sampling_rate,
@@ -406,24 +418,28 @@ class AlbumMetadata:
             "HIGH": 1,
             "LOSSLESS": 2,
             "HI_RES": 3,
+            "HI_RES_LOSSLESS": 3,
         }
 
         tidal_quality = resp.get("audioQuality", "LOW")
-        quality = quality_map[tidal_quality]
+        quality = quality_map.get(tidal_quality, 0)
+
+        media_tags = safe_get(resp, "mediaMetadata", "tags", default=[])
+        if "HIRES_LOSSLESS" in media_tags and quality < 3:
+            quality = 3
+
         if quality >= 2:
-            sampling_rate = 44100
-            if quality == 3:
-                bit_depth = 24
-            else:
-                bit_depth = 16
+            sampling_rate = resp.get("sampleRate", 44100)
+            bit_depth = resp.get("bitDepth", 24 if quality == 3 else 16)
         else:
             sampling_rate = None
             bit_depth = None
 
+        container = "FLAC" if quality == 3 else "MP4"
         info = AlbumInfo(
             id=item_id,
             quality=quality,
-            container="MP4",
+            container=container,
             label=None,
             explicit=explicit,
             sampling_rate=sampling_rate,

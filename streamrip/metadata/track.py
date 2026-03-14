@@ -178,20 +178,24 @@ class TrackMetadata:
             "HIGH": 1,
             "LOSSLESS": 2,
             "HI_RES": 3,
+            "HI_RES_LOSSLESS": 3,
         }
 
         tidal_quality = track.get("audioQuality")
         if tidal_quality is not None:
-            quality = quality_map[tidal_quality]
+            quality = quality_map.get(tidal_quality, 0)
         else:
             quality = 0
 
+        # audioQuality may say "LOSSLESS" even for Hi-Res tracks;
+        # check mediaMetadata.tags for the true capability.
+        media_tags = safe_get(track, "mediaMetadata", "tags", default=[])
+        if "HIRES_LOSSLESS" in media_tags and quality < 3:
+            quality = 3
+
         if quality >= 2:
-            sampling_rate = 44100
-            if quality == 3:
-                bit_depth = 24
-            else:
-                bit_depth = 16
+            sampling_rate = track.get("sampleRate", 44100)
+            bit_depth = track.get("bitDepth", 24 if quality == 3 else 16)
         else:
             sampling_rate = bit_depth = None
 
