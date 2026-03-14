@@ -5,6 +5,19 @@
 
 A scriptable stream downloader for Qobuz, Tidal, Deezer and SoundCloud.
 
+> **This is a fork of [nathom/streamrip](https://github.com/nathom/streamrip)** (version `2.2.0+zh`) with Tidal Hi-Res Lossless fixes.
+
+### Changes in this fork
+
+- **Tidal Hi-Res Lossless downloads** — Tidal Hi-Res (24-bit, up to 192kHz) tracks now download correctly instead of silently falling back to CD quality. The fix handles Tidal's MPEG-DASH manifests and remuxes fMP4 segments to raw FLAC via ffmpeg.
+- **Correct album folder naming** — Hi-Res albums are labeled `[HIRES]`, CD-quality albums show `[FLAC] [16B-44100kHz]`, fixing the misleading `[MP4]` container label.
+- **Accurate download speed display** — Progress bar now shows real throughput (MB/s) for Hi-Res segmented downloads.
+- **Updated quality strings** — `HI_RES` replaced with `HI_RES_LOSSLESS` to match Tidal's current API.
+
+Qobuz, Deezer, and SoundCloud downloads are unaffected by these changes.
+
+---
+
 ![downloading an album](https://github.com/nathom/streamrip/blob/dev/demo/download_album.png?raw=true)
 
 ## Features
