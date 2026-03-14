@@ -78,7 +78,14 @@ class AlbumMetadata:
             "container": self.info.container,
         }
 
-        return clean_filepath(formatter.format(**info))
+        result = formatter.format(**info)
+
+        # Clean up quality brackets that contain only placeholder defaults
+        # e.g. "[UnknownB-UnknownkHz]" → removed entirely
+        result = re.sub(r"\s*\[Unknown\w*-Unknown\w*\]", "", result)
+        result = re.sub(r"\s*\[Unknown\]", "", result)
+
+        return clean_filepath(result)
 
     @classmethod
     def from_qobuz(cls, resp: dict) -> AlbumMetadata:
@@ -341,13 +348,26 @@ class AlbumMetadata:
             quality = 3
 
         if quality >= 2:
-            sampling_rate = resp.get("sampleRate", 44100)
-            bit_depth = resp.get("bitDepth", 24 if quality == 3 else 16)
+            sampling_rate = resp.get("sampleRate")
+            bit_depth = resp.get("bitDepth")
+            if sampling_rate is None and bit_depth is None and quality == 3:
+                # Hi-Res detected from mediaMetadata.tags but the metadata API
+                # doesn't provide actual sampleRate/bitDepth — leave as None
+                # so the folder name shows [HIRES] instead of fake values.
+                pass
+            else:
+                sampling_rate = sampling_rate or 44100
+                bit_depth = bit_depth or 16
         else:
             sampling_rate = None
             bit_depth = None
 
-        container = "FLAC" if quality == 3 else "MP4"
+        if quality == 3 and sampling_rate is None:
+            container = "HIRES"
+        elif quality >= 2:
+            container = "FLAC"
+        else:
+            container = "MP4"
         info = AlbumInfo(
             id=item_id,
             quality=quality,
@@ -429,13 +449,23 @@ class AlbumMetadata:
             quality = 3
 
         if quality >= 2:
-            sampling_rate = resp.get("sampleRate", 44100)
-            bit_depth = resp.get("bitDepth", 24 if quality == 3 else 16)
+            sampling_rate = resp.get("sampleRate")
+            bit_depth = resp.get("bitDepth")
+            if sampling_rate is None and bit_depth is None and quality == 3:
+                pass
+            else:
+                sampling_rate = sampling_rate or 44100
+                bit_depth = bit_depth or 16
         else:
             sampling_rate = None
             bit_depth = None
 
-        container = "FLAC" if quality == 3 else "MP4"
+        if quality == 3 and sampling_rate is None:
+            container = "HIRES"
+        elif quality >= 2:
+            container = "FLAC"
+        else:
+            container = "MP4"
         info = AlbumInfo(
             id=item_id,
             quality=quality,

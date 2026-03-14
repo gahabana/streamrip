@@ -326,7 +326,11 @@ class TidalDashDownloadable(Downloadable):
         self.urls = urls  # [init_url, seg_1, seg_2, ...]
         codec = codec.lower()
         self.extension = "flac" if codec in ("flac", "mqa") else "m4a"
-        self._size = len(urls)
+
+    async def size(self) -> int:
+        # Total size is unknown upfront; return 0 so the progress bar
+        # shows transfer speed without a percentage/ETA.
+        return 0
 
     async def _download(self, path: str, callback):
         """Download all segments concurrently, concatenate, then remux to FLAC."""
@@ -336,14 +340,13 @@ class TidalDashDownloadable(Downloadable):
         segment_paths: dict[int, str] = {}
 
         tasks = [
-            asyncio.create_task(self._download_segment(i, url, sem))
+            asyncio.create_task(self._download_segment(i, url, sem, callback))
             for i, url in enumerate(self.urls)
         ]
 
         for coro in asyncio.as_completed(tasks):
             index, seg_path = await coro
             segment_paths[index] = seg_path
-            callback(1)
 
         # Concatenate segments in order into a temporary fMP4 file
         ordered_paths = [segment_paths[i] for i in range(segment_count)]
@@ -384,7 +387,7 @@ class TidalDashDownloadable(Downloadable):
             shutil.move(concat_tmp, path)
 
     async def _download_segment(
-        self, index: int, url: str, sem: asyncio.Semaphore
+        self, index: int, url: str, sem: asyncio.Semaphore, callback
     ) -> tuple[int, str]:
         tmp = generate_temp_path(url)
         async with sem:
@@ -393,6 +396,7 @@ class TidalDashDownloadable(Downloadable):
                 async with aiofiles.open(tmp, "wb") as f:
                     async for chunk in resp.content.iter_chunked(1024 * 64):
                         await f.write(chunk)
+                        callback(len(chunk))
         return index, tmp
 
 
